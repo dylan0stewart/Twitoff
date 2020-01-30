@@ -1,15 +1,12 @@
 
 import basilica
-import tweepy
-from decouple import config
-
 from twitoff.models import User
 
 
-TWITTER_AUTH = tweepy.OAuthHandler(config('TgnWFuhpqdGL1RRcZbFtRWhN43'), config('ETNfYA1JDqZPyDIgfUhee4S8jM14btVyD5Adw1cgnfivC4igwA'))
-TWITTER_AUTH.set_access_token(config('1221834263273857026-mYpdAYf5XGmHxmSwCP5n17E40z97lr'), config('pTIB00bxKXitaPvXB7fZZdyTd9faQidOnWGGB5hvU9ujj'))
+TWITTER_AUTH = tweepy.OAuthHandler(config('TWITTER_CONSUMER_KEY'), config('TWITTER_CONSUMER_SECRET'))
+TWITTER_AUTH.set_access_token(config('TWITTER_ACCESS_TOKEN'), config('TWITTER_ACCESS_TOKEN_SECRET'))
 TWITTER = tweepy.API(TWITTER_AUTH)
-BASILICA = basilica.Connection(config("37f31a6a-e50f-c962-be30-a75fba86bca5"))
+BASILICA = basilica.Connection(config("BASILICA_KEY"))
 
 def add_or_update_user(name):
     """ 
@@ -18,8 +15,22 @@ def add_or_update_user(name):
     """
     try:
         twitter_user = TWITTER.get_user(name)
-        db_user = User.query.get(twitter_user.id)
+        db_user = (User.query.get(twitter_user.id) or User(id=twitter_user.id, name=name))
+        DB.session.add(db_user)
+        tweets = twitter_user.timeline(count=200,
+                                       exclude_replies=True,
+                                       include_rts=False,
+                                       since_id=db_user.newest_tweet_id)
+        if tweets:
+            db_user.newest_tweet_id = tweets[0].id
 
-    except:
-
+        for tweet in tweets:
+            embedding = BASILICA.embed_sentence(tweet.text, model='twitter')
+            db_tweet = Tweet(id=tweet.id, text=tweet.text, emdbedding=embedding)
+            db_user.tweets.append(db_tweet)
+            DB.session.add(db_tweet)
+    except Exception as e:
+        print(f'Encountered error while processing {name}: {e}')
+        raise e
     else:
+        DB.session.commit()
